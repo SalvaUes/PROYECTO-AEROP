@@ -6,3 +6,5 @@ export interface Agente {
   habilidades: string[];  // Un arreglo de textos (ej. "Rayos X", "Patrullaje")
   estaActivo: boolean;
 }
+
+//subiendo prueba DE SUBIDA
