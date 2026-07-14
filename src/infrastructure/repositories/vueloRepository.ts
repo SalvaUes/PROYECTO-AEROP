@@ -31,7 +31,64 @@ const mapToDomain = (data: VueloRow): Vuelo => ({
     : undefined,
 });
 
+
+const rangoDiaIso = (fecha: string): { inicio: string; fin: string } => {
+  const inicio = new Date(`${fecha}T00:00:00.000Z`);
+  const fin = new Date(`${fecha}T23:59:59.999Z`);
+
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+    throw new Error(`Formato de fecha inválido: ${fecha}`);
+  }
+
+  return {
+    inicio: inicio.toISOString(),
+    fin: fin.toISOString(),
+  };
+};
+
+const rangoMesIso = (mes: string): { inicio: string; fin: string } => {
+  const inicio = new Date(`${mes}-01T00:00:00.000Z`);
+  const fin = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+    throw new Error(`Formato de mes inválido: ${mes}`);
+  }
+
+  return {
+    inicio: inicio.toISOString(),
+    fin: fin.toISOString(),
+  };
+};
 export const vueloRepository = {
+
+
+  async getByFecha(fecha: string): Promise<Vuelo[]> {
+    const { inicio, fin } = rangoDiaIso(fecha);
+
+    const { data, error } = await supabase
+      .from('vuelos')
+      .select('*, aerolineas(*)')
+      .gte('hora_programada', inicio)
+      .lte('hora_programada', fin)
+      .order('hora_programada', { ascending: true });
+
+    if (error) throw new Error(`Error al obtener vuelos por fecha: ${error.message}`);
+    return (data || []).map(mapToDomain);
+  },
+
+  async getByMes(mes: string): Promise<Vuelo[]> {
+    const { inicio, fin } = rangoMesIso(mes);
+
+    const { data, error } = await supabase
+      .from('vuelos')
+      .select('*, aerolineas(*)')
+      .gte('hora_programada', inicio)
+      .lte('hora_programada', fin)
+      .order('hora_programada', { ascending: true });
+
+    if (error) throw new Error(`Error al obtener vuelos por mes: ${error.message}`);
+    return (data || []).map(mapToDomain);
+  },
 
   async getAll(): Promise<Vuelo[]> {
     const { data, error } = await supabase

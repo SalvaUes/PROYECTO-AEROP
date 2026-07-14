@@ -67,8 +67,47 @@ const mapToDomain = (data: TurnoRow): Turno => ({
     : undefined,
 });
 
-export const turnoRepository = {
+const rangoDiaIso = (fecha: string): { inicio: string; fin: string } => {
+  const inicio = new Date(`${fecha}T00:00:00.000Z`);
+  const fin = new Date(`${fecha}T23:59:59.999Z`);
 
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+    throw new Error(`Formato de fecha inválido: ${fecha}`);
+  }
+
+  return {
+    inicio: inicio.toISOString(),
+    fin: fin.toISOString(),
+  };
+};
+
+const rangoMesIso = (mes: string): { inicio: string; fin: string } => {
+  const inicio = new Date(`${mes}-01T00:00:00.000Z`);
+  const fin = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+    throw new Error(`Formato de mes inválido: ${mes}`);
+  }
+
+  return {
+    inicio: inicio.toISOString(),
+    fin: fin.toISOString(),
+  };
+};
+
+const consultarPorRango = async (inicioIso: string, finIso: string): Promise<Turno[]> => {
+  const { data, error } = await supabase
+    .from('turnos')
+    .select('*, agentes(*), posiciones(*), vuelos(*)')
+    .gte('hora_inicio', inicioIso)
+    .lte('hora_fin', finIso)
+    .order('hora_inicio', { ascending: true });
+
+  if (error) throw new Error(`Error al obtener turnos por rango: ${error.message}`);
+  return (data || []).map(mapToDomain);
+};
+
+export const turnoRepository = {
   async getAll(): Promise<Turno[]> {
     const { data, error } = await supabase
       .from('turnos')
@@ -79,16 +118,44 @@ export const turnoRepository = {
     return (data || []).map(mapToDomain);
   },
 
-  async getByRangoFecha(inicioIso: string, finIso: string): Promise<Turno[]> {
+  async getByFecha(fecha: string): Promise<Turno[]> {
+    const { inicio, fin } = rangoDiaIso(fecha);
+    return consultarPorRango(inicio, fin);
+  },
+
+  async getByAgenteYMes(agenteId: string, mes: string): Promise<Turno[]> {
+    const { inicio, fin } = rangoMesIso(mes);
+
     const { data, error } = await supabase
       .from('turnos')
       .select('*, agentes(*), posiciones(*), vuelos(*)')
-      .gte('hora_inicio', inicioIso)
-      .lte('hora_fin', finIso)
+      .eq('agente_id', agenteId)
+      .gte('hora_inicio', inicio)
+      .lte('hora_fin', fin)
       .order('hora_inicio', { ascending: true });
 
-    if (error) throw new Error(`Error al obtener turnos por rango: ${error.message}`);
+    if (error) throw new Error(`Error al obtener turnos del agente por mes: ${error.message}`);
     return (data || []).map(mapToDomain);
+  },
+
+  async getByMes(mes: string): Promise<Turno[]> {
+    const { inicio, fin } = rangoMesIso(mes);
+    return consultarPorRango(inicio, fin);
+  },
+
+  async getByRangoFecha(inicioIso: string, finIso: string): Promise<Turno[]> {
+    return consultarPorRango(inicioIso, finIso);
+  },
+
+  async getById(id: string): Promise<Turno | null> {
+    const { data, error } = await supabase
+      .from('turnos')
+      .select('*, agentes(*), posiciones(*), vuelos(*)')
+      .eq('id', id)
+      .single();
+
+    if (error) throw new Error(`Error al obtener turno: ${error.message}`);
+    return data ? mapToDomain(data) : null;
   },
 
   async create(turno: Omit<Turno, 'id' | 'agente' | 'posicion' | 'vuelo'>): Promise<Turno> {
@@ -108,14 +175,13 @@ export const turnoRepository = {
     return mapToDomain(data);
   },
 
-  // Creación masiva para el algoritmo de auto-asignación
   async createBulk(turnos: Omit<Turno, 'id' | 'agente' | 'posicion' | 'vuelo'>[]): Promise<Turno[]> {
-    const insertData = turnos.map((t) => ({
-      agente_id: t.agenteId,
-      posicion_id: t.posicionId ?? null,
-      vuelo_id: t.vueloId ?? null,
-      hora_inicio: t.horaInicio,
-      hora_fin: t.horaFin,
+    const insertData = turnos.map((turno) => ({
+      agente_id: turno.agenteId,
+      posicion_id: turno.posicionId ?? null,
+      vuelo_id: turno.vueloId ?? null,
+      hora_inicio: turno.horaInicio,
+      hora_fin: turno.horaFin,
     }));
 
     const { data, error } = await supabase
@@ -125,6 +191,26 @@ export const turnoRepository = {
 
     if (error) throw new Error(`Error en creación masiva de turnos: ${error.message}`);
     return (data || []).map(mapToDomain);
+  },
+
+  async update(id: string, turno: Partial<Omit<Turno, 'id' | 'agente' | 'posicion' | 'vuelo'>>): Promise<Turno> {
+    const updateData: Partial<Pick<TurnoRow, 'agente_id' | 'posicion_id' | 'vuelo_id' | 'hora_inicio' | 'hora_fin'>> = {};
+
+    if (turno.agenteId !== undefined) updateData.agente_id = turno.agenteId;
+    if (turno.posicionId !== undefined) updateData.posicion_id = turno.posicionId;
+    if (turno.vueloId !== undefined) updateData.vuelo_id = turno.vueloId;
+    if (turno.horaInicio !== undefined) updateData.hora_inicio = turno.horaInicio;
+    if (turno.horaFin !== undefined) updateData.hora_fin = turno.horaFin;
+
+    const { data, error } = await supabase
+      .from('turnos')
+      .update(updateData)
+      .eq('id', id)
+      .select('*, agentes(*), posiciones(*), vuelos(*)')
+      .single();
+
+    if (error) throw new Error(`Error al actualizar turno: ${error.message}`);
+    return mapToDomain(data);
   },
 
   async delete(id: string): Promise<void> {

@@ -69,9 +69,21 @@ const mapToDomain = (data: OperacionRow): Operacion => ({
     : undefined,
 });
 
-export const operacionRepository = {
+const rangoMes = (mes: string): { inicio: string; fin: string } => {
+  const inicio = new Date(`${mes}-01T00:00:00.000Z`);
+  const fin = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + 1, 0, 23, 59, 59, 999));
 
-  // OBTENER TODAS LAS OPERACIONES (Con relaciones de Vuelo, Agente y Posición)
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+    throw new Error(`Formato de mes inválido: ${mes}`);
+  }
+
+  return {
+    inicio: inicio.toISOString().slice(0, 10),
+    fin: fin.toISOString().slice(0, 10),
+  };
+};
+
+export const operacionRepository = {
   async getAll(): Promise<Operacion[]> {
     const { data, error } = await supabase
       .from('operaciones')
@@ -82,7 +94,6 @@ export const operacionRepository = {
     return (data || []).map(mapToDomain);
   },
 
-  // OBTENER OPERACIONES DE UNA FECHA ESPECÍFICA (Para la vista de control diario)
   async getByFecha(fecha: string): Promise<Operacion[]> {
     const { data, error } = await supabase
       .from('operaciones')
@@ -94,7 +105,20 @@ export const operacionRepository = {
     return (data || []).map(mapToDomain);
   },
 
-  // OBTENER UNA OPERACIÓN POR ID
+  async getByMes(mes: string): Promise<Operacion[]> {
+    const { inicio, fin } = rangoMes(mes);
+
+    const { data, error } = await supabase
+      .from('operaciones')
+      .select('*, vuelos(*), agentes(*), posiciones(*)')
+      .gte('fecha', inicio)
+      .lte('fecha', fin)
+      .order('fecha', { ascending: false });
+
+    if (error) throw new Error(`Error al obtener operaciones del mes ${mes}: ${error.message}`);
+    return (data || []).map(mapToDomain);
+  },
+
   async getById(id: string): Promise<Operacion | null> {
     const { data, error } = await supabase
       .from('operaciones')
@@ -106,7 +130,6 @@ export const operacionRepository = {
     return data ? mapToDomain(data) : null;
   },
 
-  // CREAR UNA NUEVA OPERACIÓN
   async create(operacion: Omit<Operacion, 'id' | 'vuelo' | 'agente' | 'posicion'>): Promise<Operacion> {
     const { data, error } = await supabase
       .from('operaciones')
@@ -125,7 +148,6 @@ export const operacionRepository = {
     return mapToDomain(data);
   },
 
-  // ACTUALIZAR UNA OPERACIÓN
   async update(id: string, operacion: Partial<Omit<Operacion, 'id' | 'vuelo' | 'agente' | 'posicion'>>): Promise<Operacion> {
     const updateData: Partial<Pick<OperacionRow, 'fecha' | 'vuelo_id' | 'agente_id' | 'posicion_id' | 'estado' | 'observaciones'>> = {};
 
@@ -147,7 +169,6 @@ export const operacionRepository = {
     return mapToDomain(data);
   },
 
-  // ELIMINAR UNA OPERACIÓN
   async delete(id: string): Promise<void> {
     const { error } = await supabase
       .from('operaciones')
